@@ -1,56 +1,27 @@
-import { useEffect, useState } from "react";
+import { useState, useEffect } from 'react';
 
-type AudioBufferList = (AudioBuffer | null)[];
-
-function useBufferLoader(context: AudioContext | null, urlList: string[]): AudioBufferList {
-  const [bufferList, setBufferList] = useState<AudioBufferList>(new Array(urlList.length).fill(null));
-  const [loadCount, setLoadCount] = useState<number>(0);
+const useBufferLoader = (audioContext: AudioContext, urls: string[]) => {
+  const [buffers, setBuffers] = useState<AudioBuffer[]>([]);
 
   useEffect(() => {
-    console.log("useEffect - useBufferLoader");
-
-    const loadBuffer = (url: string, index: number) => {
-      const request = new XMLHttpRequest();
-      request.open("GET", url, true);
-      request.responseType = "arraybuffer";
-
-      request.onload = function () {
-        if (context) {
-          context.decodeAudioData(
-            request.response,
-            function (buffer) {
-              if (!buffer) {
-                alert('Error decoding file data: ' + url);
-                return;
-              }
-              setBufferList((prevBufferList) => {
-                const newBufferList = [...prevBufferList];
-                newBufferList[index] = buffer;
-                return newBufferList;
-              });
-              setLoadCount((prevLoadCount) => prevLoadCount + 1);
-            }
-          );
-        }
-        else {
-          alert("No context provided")
-        }
-
-      };
-
-      request.onerror = function () {
-        alert('BufferLoader: XHR error');
-      };
-
-      request.send();
+    const loadBuffer = async (url: string): Promise<AudioBuffer> => {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      return audioContext.decodeAudioData(arrayBuffer);
     };
 
-    if (loadCount < urlList.length) {
-      loadBuffer(urlList[loadCount], loadCount);
-    }
-  }, [context, loadCount, urlList]);
+    const loadBuffers = async () => {
+      const promises = urls.map(url => loadBuffer(url));
+      const loadedBuffers = await Promise.all(promises);
+      setBuffers(loadedBuffers);
+    };
 
-  return bufferList;
-}
+    loadBuffers();
+
+    // Since dependencies are empty, this effect will run only once, on mount.
+  }, []);
+
+  return buffers;
+};
 
 export default useBufferLoader;
