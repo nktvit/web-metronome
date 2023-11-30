@@ -1,16 +1,16 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import useBufferLoader from "./hooks/useBufferLoader";
 import { FaPlay, FaStop } from "react-icons/fa6";
 import { FaCircle, FaRegCircle } from "react-icons/fa6";
 
 const App: React.FC = () => {
-  const context = useMemo(() => new (window.AudioContext || (window as any).webkitAudioContext)(), []);
+  const audioCtx = useRef(new (window.AudioContext || (window as any).webkitAudioContext)());
 
   const audioUrls = ['./sounds/1.wav', './sounds/2.wav']
-  const bufferLoader = useBufferLoader(context, audioUrls)
+  const bufferLoader = useBufferLoader(audioCtx.current, audioUrls)
 
-  const amp = context.createGain();
-  amp.connect(context.destination);
+  const amp = audioCtx.current.createGain();
+  amp.connect(audioCtx.current.destination);
 
   const [bpm, setBpm] = useState<number>(90);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -18,67 +18,75 @@ const App: React.FC = () => {
   const MAX_HISTORY_LENGTH = 3;
   const INACTIVITY_TIME = 3000;
 
+
+  const scheduleAheadTime = 0.1; // Schedule beats slightly ahead of current time
+  const nextNoteTimeRef = useRef(0);
+  let timerID: any;
+
   
-  const switchMetronome = () => {
-    setIsPlaying(!isPlaying);
-  }
+  const stopMetronome = useCallback(() => {
+    setIsPlaying(false);
+    if (audioCtx.current) {
+      audioCtx.current.suspend()
+    }
+  }, [])
+  const startMetronome = useCallback(() => {
+    setIsPlaying(true);
+  }, [])
   
 
+  const playMetronome = useCallback(() => {
+    const beatsPerInterval = 4;
+    const interval = 60 / bpm;
+    let count = 0;
+
+    const scheduleBeat = (time: any, beatIndex: number) => {
+      const buffer = beatIndex % beatsPerInterval === 0 ? bufferLoader[0] : bufferLoader[1];
+      if (buffer) {
+        const source = audioCtx.current.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.current.destination);
+        source.start(time);
+      }
+    };
+
+    const scheduler = () => {
+      while (nextNoteTimeRef.current < audioCtx.current.currentTime + scheduleAheadTime) {
+        scheduleBeat(nextNoteTimeRef.current, count);
+        nextNoteTimeRef.current += interval;
+        count++;
+      }
+      timerID = setTimeout(scheduler, interval * 1000);
+    };
+
+    if (audioCtx.current.state === "suspended") {
+      audioCtx.current.resume();
+    }
+    nextNoteTimeRef.current = audioCtx.current.currentTime;
+    scheduler();
+  }, [bpm, bufferLoader]);
   useEffect(() => {
     if (isPlaying) {
-      const playBeat = (buffer: AudioBuffer | null) => {
-        if (buffer) {
-          const source = context.createBufferSource();
-          source.buffer = buffer;
-          source.connect(context.destination);
-          if (context.state === "suspended") {
-            context.resume()
-          }
-          source.start();
-        }
-      };
-      const playMetronome = () => {
-        const beatsPerInterval = 4; // You can adjust this based on your desired pattern
-        const interval = 60 / bpm;
-        let count = 0;
-    
-        const playNextBeat = () => {
-          if (count % beatsPerInterval === 0) {
-            playBeat(bufferLoader[0]); // Playing the first beat, you can modify this based on your pattern
-          } else {
-            playBeat(bufferLoader[1]); // Playing the second beat, adjust as needed
-          }
-    
-          count++;
-    
-          if (isPlaying) {
-            setTimeout(playNextBeat, interval * 1000);
-          }
-        };
-    
-        playNextBeat();
-      };
       playMetronome();
-      
+    } else {
+      clearTimeout(timerID);
+      if (audioCtx.current.state === "running") {
+        audioCtx.current.suspend();
+      }
     }
-    else if (context.state === "running") {
-      console.log(context);
-      context.suspend()
-      console.log(context);
-      
-      
-    }
-  },[isPlaying, bpm]);
+
+    return () => clearTimeout(timerID); // Cleanup on unmount
+  }, [isPlaying, playMetronome]);
 
   useEffect(() => {
-    console.log("onContext change | useEffect - browser check");
+    console.log("onaudioCtx.current change | useEffect - browser check");
 
-    if (!context) {
+    if (!audioCtx.current) {
       alert("Your browser does not support the Web Audio API. Please use a modern browser for full functionality.");
     }
     console.log("Fine");
     
-  }, [context]);
+  }, [audioCtx.current]);
 
   const handleBpmBar = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = parseInt(e.target.value, 10);
@@ -139,7 +147,7 @@ const App: React.FC = () => {
         <button
           id="control"
           className="text-center p-3 rounded-full transition-colors focus:bg-zinc-600 hover:bg-zinc-800"
-          onClick={switchMetronome}
+          onClick={isPlaying ? stopMetronome : startMetronome}
         >
           {isPlaying ? <FaStop /> : <FaPlay />}
         </button>
