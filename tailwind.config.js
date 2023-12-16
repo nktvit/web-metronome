@@ -7,7 +7,16 @@ module.exports = {
     transitionDuration: {
         DEFAULT: '500ms',
     },
-    extend: {}
+    extend: {
+      strokeWidth: {
+        'xl': '12rem',
+        'lg': '8rem'
+      },
+      transitionDuration: {
+        '300': '0.3s',
+        '200': '0.2s',
+      }
+    }
   },
   plugins: [],
 }
