@@ -1,15 +1,14 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import { FaPlay, FaStop } from "react-icons/fa6";
 import BeatManager from "./components/BeatManager";
 
-interface SelectedSounds {
-  [key: string]: number;
-}
-
 const soundUrls = ['./sounds/1.wav', './sounds/2.wav'];
-const MAX_BEAT_IN_TIME = 12;
+const MAX_BEAT = 16;
+const MAX_TICK_IN_TIME = 16;
 const MAX_HISTORY_LENGTH = 4;
 const INACTIVITY_TIME = 3000;
+const MIN_BPM = 15;
+const MAX_BPM = 300;
 
 const App: React.FC = () => {
   const audioCtx = useRef<AudioContext | null>(null);
@@ -17,28 +16,25 @@ const App: React.FC = () => {
   const playingSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const timerIdRef = useRef<number | null>(null);
   const nextNoteTimeRef = useRef(0);
+  const soundBuffersRef = useRef<AudioBuffer[] | null>(null);
+  const tapHistory = useRef<number[]>([]);
 
   const scheduleAheadTime = 0.1;
 
-  const [bpm, setBpm] = useState<number>(90);
-  const [beats, setBeats] = useState<number>(4);
-
-  const [selectedSounds, setSelectedSounds] = useState<SelectedSounds>(
-    Array.from({ length: beats }, (_, i) => (i + 1).toString()).reduce(
-      (acc, beat) => {
-        acc[beat] = beat === "1" ? 0 : 1;
-        return acc;
-      },
-      {} as SelectedSounds
-    )
+  const [patternSounds, setPatternSounds] = useState(
+    [
+      [0, 1, 1, 1],
+      [0, 1, 1, 1],
+      [0, 1, 1, 1],
+      [0, 1, 1, 1],
+    ]
   );
 
-  const soundBuffersRef = useRef<AudioBuffer[] | null>(null);
+  const beats = patternSounds.length
+
+  const [bpm, setBpm] = useState<number>(60);
 
   const [isPlaying, setPlaying] = useState<boolean>(false);
-
-  const tapHistory = useRef<number[]>([]);
-
 
   const loadBeatBuffers = async (audioContext: AudioContext, urls: string[]): Promise<AudioBuffer[]> => {
     const buffers = [];
@@ -51,7 +47,6 @@ const App: React.FC = () => {
     return buffers;
   };
 
-
   const stopAllSources = () => {
     playingSourcesRef.current.forEach(source => {
       source.stop();
@@ -59,13 +54,19 @@ const App: React.FC = () => {
     playingSourcesRef.current.clear();
   };
 
-  const scheduleBeat = (time: number, beatNumber: number) => {
+  // Play the sound
+  // @params play what {beatNumber}, play when {time}
+
+  //TODO: Refactor so that scheduleBeat accept {time} and the pointer in the patternSounds.
+  // It is crucial to check the beatSound in real time so that even after soundSwitch we can play right sound on the same iteration
+  // Think over how to make the code clear with this change 
+
+  const scheduleBeat = (time: number, beatSound: number) => {
     const audioContext = audioCtx.current;
 
     if (!audioContext || !soundBuffersRef.current) return;
 
-    const currentSound = selectedSounds[Object.keys(selectedSounds)[beatNumber]]
-    const buffer = soundBuffersRef.current[currentSound];
+    const buffer = soundBuffersRef.current[beatSound];
     const source = audioContext.createBufferSource();
 
     source.buffer = buffer;
@@ -73,8 +74,8 @@ const App: React.FC = () => {
     source.start(time);
 
     if (amp.current) {
-      // todo: make adjustable
-      const gainValue = beatNumber === 0 ? 2 : 1 //play gain x2 for the first beat
+      // TODO: make gain adjustable in settings
+      const gainValue = beatSound === 0 ? 4 : 1 //play gain x2 for the first beat
 
       amp.current.gain.setValueAtTime(gainValue, audioContext.currentTime);
       source.connect(amp.current);
@@ -103,51 +104,29 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    setSelectedSounds(prevSounds => {
-      const newSounds = { ...prevSounds };
-      const currentLength = Object.keys(newSounds).length;
-
-      if (beats > currentLength) {
-        // If the number of beats has increased, add new beats with default value 0
-        for (let i = currentLength + 1; i <= beats; i++) {
-          newSounds[i.toString()] = 0; // Ensure the key is a string
-        }
-      } else {
-        // If the number of beats has decreased, remove the excess beats
-        for (let i = currentLength; i > beats; i--) {
-          delete newSounds[i.toString()]; // Ensure the key is a string
-        }
-      }
-
-      return newSounds;
-    });
-  }, [beats]);
-
-
-  useEffect(() => {
     const audioContext = audioCtx.current;
 
     if (!audioContext) return;
 
-    let beatCounter = 0;
 
-    const play = () => { // Function to start playing the beats
+    const play = () => {
       if (!soundBuffersRef.current) return
 
-      while (nextNoteTimeRef.current < audioContext.currentTime + scheduleAheadTime) { // Schedule beats within the next set time frame
-        const beatKeys = Object.keys(selectedSounds);
-        const currentBeat = Number(beatKeys[beatCounter % beats]) - 1;
-        scheduleBeat(nextNoteTimeRef.current, currentBeat);
-        nextNoteTimeRef.current += 60 / bpm / beats; // Calculate the time for the next beat based on BPM and total beats
-        beatCounter++;
+      while (nextNoteTimeRef.current < audioContext.currentTime + scheduleAheadTime) {
+        for (let i = 0; i < beats; i++) {
+          const ticksPerBeat = patternSounds[i]
+          ticksPerBeat.forEach(tick => {
+            scheduleBeat(nextNoteTimeRef.current, tick);
+            nextNoteTimeRef.current += 60 / bpm / ticksPerBeat.length;
+          })
+        }
       }
 
-      timerIdRef.current = window.setTimeout(play, 25); // Schedule the next call of play
+      timerIdRef.current = window.setTimeout(play, 25);
     };
 
     if (isPlaying) {
       nextNoteTimeRef.current = audioContext.currentTime;
-      beatCounter = 0;
 
       play();
     } else {
@@ -175,11 +154,17 @@ const App: React.FC = () => {
 
   }, []);
 
+  const changeTempo = (newTempo: number) => setBpm(newTempo < MIN_BPM ? MIN_BPM : newTempo > MAX_BPM ? MAX_BPM : newTempo);
+
   const handleBpmBar = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = parseInt(e.target.value, 10);
-    setBpm(newValue < 30 ? 30 : newValue > 300 ? 300 : newValue);
-    setPlaying(false)
-    setPlaying(true)
+
+    changeTempo(newValue)
+
+    if (isPlaying) {
+      setPlaying(false)
+      setPlaying(true)
+    }
   };
 
   const handleTap = () => {
@@ -198,7 +183,7 @@ const App: React.FC = () => {
           const averageTimeDifference = calculateAverageTimeDifference();
           const calculatedBpm = Math.round(60000 / averageTimeDifference);
 
-          setBpm(calculatedBpm < 30 ? 30 : calculatedBpm > 300 ? 300 : calculatedBpm);
+          changeTempo(calculatedBpm)
         }
       }
     });
@@ -212,44 +197,63 @@ const App: React.FC = () => {
     return timeDifferences.reduce((acc, val) => acc + val, 0) / (timeDifferences.length - 1);
   };
 
-  const switchSound = (index: number) => {
-    const keys = Object.keys(selectedSounds);
-    const selectedKey = keys[index];
-    if (!selectedKey) {
-      console.log(index);
-      return;
-    }
+  function switchSound(beatIndex: number, tickIndex: number) {
+    if (typeof beatIndex === 'undefined' || typeof tickIndex === 'undefined') return;
 
-    setSelectedSounds(prevSounds => ({
-      ...prevSounds,
-      [selectedKey]: prevSounds[selectedKey] === 2 ? 0 : prevSounds[selectedKey] + 1
-    }));
+    const soundToChange = patternSounds[beatIndex][tickIndex]
+
+    const newPattern = [...patternSounds]
+    newPattern[beatIndex][tickIndex] = soundToChange === 2 ? 0 : soundToChange + 1
+
+    setPatternSounds(newPattern);
   };
 
-  const addBeat = () => {
-    if (beats === MAX_BEAT_IN_TIME) return
+  function addBeat() {
+    if (beats === MAX_BEAT) return
 
-    setSelectedSounds(prevSounds => {
-      const newBeatNumber = Object.keys(prevSounds).length + 1;
-      return { ...prevSounds, [newBeatNumber.toString()]: 1 };
-    });
-    setBeats(beats + 1)
+    const lastBeatLength = patternSounds[beats - 1].length
+    const newBeat = [0, ...new Array(lastBeatLength - 1).fill(1)]
 
+    setPatternSounds([...patternSounds, newBeat]);
   };
 
-  const removeBeat = () => {
+  function removeBeat() {
     if (beats === 1) return
 
-    setSelectedSounds(prevSounds => {
-      const newSounds = { ...prevSounds };
-      const lastBeatNumber = Object.keys(newSounds).length.toString();
+    const newPattern = [...patternSounds]
+    newPattern.pop()
 
-      delete newSounds[lastBeatNumber];
-      return newSounds;
-    });
-    setBeats(beats - 1)
+    setPatternSounds(newPattern);
   };
 
+  function addTick(beatIndex: number) {
+    const currentBeat = patternSounds[beatIndex]
+
+    if (currentBeat.length === MAX_TICK_IN_TIME) return
+
+    const newBeat = [...currentBeat, 1]
+
+    const newPattern = [...patternSounds]
+
+    newPattern[beatIndex] = newBeat
+
+    setPatternSounds(newPattern)
+  }
+
+  function removeTick(beatIndex: number) {
+    const currentBeat = patternSounds[beatIndex]
+
+    if (currentBeat.length === 1) return
+
+    const newBeat = [...currentBeat]
+    newBeat.pop()
+
+    const newPattern = [...patternSounds]
+
+    newPattern[beatIndex] = newBeat
+
+    setPatternSounds(newPattern)
+  }
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-black">
@@ -264,8 +268,8 @@ const App: React.FC = () => {
             type="range"
             name="bpm"
             id=""
-            min="30"
-            max="300"
+            min={MIN_BPM}
+            max={MAX_BPM}
             value={bpm}
             onChange={handleBpmBar}
             step="1"
@@ -273,11 +277,14 @@ const App: React.FC = () => {
 
         </div>
         <BeatManager
-          selectedSounds={selectedSounds}
-          handleSwitchSound={switchSound}
+          patternSounds={patternSounds}
+          switchSound={switchSound}
+          handleAddTick={addTick}
+          handleRemoveTick={removeTick}
           handleAddBeat={addBeat}
           handleRemoveBeat={removeBeat}
         />
+        {/* TODO spacebar to play and stop */}
         <button
           id="control"
           className="text-center p-3 rounded-full transition-colors focus:bg-zinc-600 hover:bg-zinc-800"
