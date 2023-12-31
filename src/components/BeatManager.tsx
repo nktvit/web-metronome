@@ -42,7 +42,7 @@ const BeatManager: React.FC<BeatManagerProps> = ({ patternSounds, switchSound, h
                     })
                     }
                 </div>
-                <div className="flex flex-row space-x-8 justify-center my-8">
+                <div className="flex flex-row justify-center my-4">
                     {patternSounds.map((beat, beatIndex) => {
                         return <Beat beat={beat} beatIndex={beatIndex} handleSwitchSound={switchSound} key={beatIndex} />
                     })}
@@ -67,7 +67,7 @@ const BeatManager: React.FC<BeatManagerProps> = ({ patternSounds, switchSound, h
             {beatsAmount < MAX_BEAT && (
                 <button
                     onClick={() => handleAddBeat()}
-                    className="p-4 ml-4 mt-18 h-fit transition-[transform,color] duration-200 hover:text-zinc-400 hover:scale-125">
+                    className="p-4 ml-4 mt-16 h-fit transition-[transform,color] duration-200 hover:text-zinc-400 hover:scale-125">
                     <FaPlus />
                 </button>
             )}

@@ -151,8 +151,22 @@ const App: React.FC = () => {
     if (!audioCtx.current) {
       alert("Your browser does not support the Web Audio API. Please use a modern browser for full functionality.");
     }
+  }, [])
+  useEffect(() => {
+    const handleKeyDown = (e: any) => {
+      if (e.key === ' ') {
+        e.preventDefault()
+        setPlaying(!isPlaying)
+      }
+    };
 
-  }, []);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+
+  }, [isPlaying]);
 
   const changeTempo = (newTempo: number) => setBpm(newTempo < MIN_BPM ? MIN_BPM : newTempo > MAX_BPM ? MAX_BPM : newTempo);
 
@@ -284,7 +298,6 @@ const App: React.FC = () => {
           handleAddBeat={addBeat}
           handleRemoveBeat={removeBeat}
         />
-        {/* TODO spacebar to play and stop */}
         <button
           id="control"
           className="text-center p-3 rounded-full transition-colors focus:bg-zinc-600 hover:bg-zinc-800"
