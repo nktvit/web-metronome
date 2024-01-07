@@ -1,7 +1,7 @@
-import React from 'react';
+import {memo} from 'react';
 import { FaCircle, FaRegCircle, FaRegCircleDot } from 'react-icons/fa6';
 
-const Beat = React.memo(({ beat, beatIndex, handleSwitchSound }:
+const Beat = memo(({ beat, beatIndex, handleSwitchSound }:
     { beat: number[]; beatIndex: number; handleSwitchSound: (beatIndex: number, tickIndex: number) => void; }) => {
     return (
         <div key={beatIndex} className={`flex flex-col justify-center items-center`}>

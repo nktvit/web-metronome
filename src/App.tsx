@@ -1,14 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { FaPlay, FaStop } from "react-icons/fa6";
 import BeatManager from "./components/BeatManager";
+import ControlPanel from "./components/ControlPanel";
+import config from './config';
+import BPMAdjuster from "./components/BPMAdjuster";
 
 const soundUrls = ['./sounds/1.wav', './sounds/2.wav'];
-const MAX_BEAT = 16;
-const MAX_TICK_IN_TIME = 16;
-const MAX_HISTORY_LENGTH = 4;
-const INACTIVITY_TIME = 3000;
-const MIN_BPM = 15;
-const MAX_BPM = 300;
+const MIN_BPM = config.minBpm;
+const MAX_BPM = config.maxBpm;
 
 const App: React.FC = () => {
   const audioCtx = useRef<AudioContext | null>(null);
@@ -19,13 +17,14 @@ const App: React.FC = () => {
   const soundBuffersRef = useRef<AudioBuffer[] | null>(null);
   const patternSoundsRef = useRef<number[][]>([[0, 1, 1, 1], [0, 1, 1, 1]]);
   const currentPosRef = useRef({ rep: 0, beat: 0 });
-  const nextBpmRef = useRef(30);
+  const nextBpmRef = useRef(config.initialBpm);
   const tapHistory = useRef<number[]>([]);
 
   const [patternSounds, setPatternSounds] = useState<number[][]>(patternSoundsRef.current);
   const [bpm, setBpm] = useState<number>(nextBpmRef.current);
   const [isPlaying, setPlaying] = useState<boolean>(false);
 
+  const [maxBeats, setMaxBeats] = useState<number>(0) //TODO: make UI shrink when amount of beats per rep exceeds 4
 
   const beats = patternSounds.length
 
@@ -177,25 +176,19 @@ const App: React.FC = () => {
 
   const changeTempo = (newTempo: number) => setBpm(newTempo < MIN_BPM ? MIN_BPM : newTempo > MAX_BPM ? MAX_BPM : newTempo);
 
-  const handleBpmBar = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = parseInt(e.target.value, 10);
-
-    changeTempo(newValue)
-  };
-
   const handleTap = () => {
     const now = Date.now();
     tapHistory.current.push(now);
 
     requestAnimationFrame(() => {
-      if (tapHistory.current.length > MAX_HISTORY_LENGTH) {
+      if (tapHistory.current.length > config.maxHistoryLength) {
         tapHistory.current.shift();
       }
 
       if (tapHistory.current.length > 1) {
         const timeDifference = now - tapHistory.current[tapHistory.current.length - 2];
 
-        if (timeDifference <= INACTIVITY_TIME) {
+        if (timeDifference <= config.inactivityTime) {
           const averageTimeDifference = calculateAverageTimeDifference();
           const calculatedBpm = Math.round(60000 / averageTimeDifference);
 
@@ -225,7 +218,7 @@ const App: React.FC = () => {
   };
 
   function addBeat() {
-    if (beats === MAX_BEAT) return
+    if (beats === config.maxBeat) return
 
     const lastBeatLength = patternSounds[beats - 1].length
     const newBeat = [0, ...new Array(lastBeatLength - 1).fill(1)]
@@ -245,7 +238,7 @@ const App: React.FC = () => {
   function addTick(beatIndex: number) {
     const currentBeat = patternSounds[beatIndex]
 
-    if (currentBeat.length === MAX_TICK_IN_TIME) return
+    if (currentBeat.length === config.maxTickInTime) return
 
     const newBeat = [...currentBeat, 1]
 
@@ -270,29 +263,20 @@ const App: React.FC = () => {
 
     setPatternSounds(newPattern)
   }
+  function togglePlay() {
+    setPlaying(!isPlaying)
+  }
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-black">
-      <div className="flex flex-col items-center space-y-8 text-md text-zinc-50">
-        <div className="bg-zinc-900 p-8 mb-6 rounded-2xl flex flex-col items-center">
-
-          <div className="text-4xl cursor-pointer block text-center rounded-lg w-32 py-6 px-8 mb-6 transition-colors hover:bg-zinc-800" onClick={handleTap}>
-            {bpm}
-          </div>
-          <input
-            className="transparent h-[4px] w-full cursor-pointer appearance-none border-transparent bg-rose-500 dark:bg-rose-500"
-            type="range"
-            name="bpm"
-            id=""
-            min={MIN_BPM}
-            max={MAX_BPM}
-            value={bpm}
-            onChange={handleBpmBar}
-            step="1"
-          />
-
-        </div>
-        <BeatManager
+      <div className={`flex flex-col items-center ${maxBeats > 4 ? "space-y-2" : "space-y-6"} text-md text-zinc-50`}>
+        <BPMAdjuster
+          bpm={bpm}
+          handleBpmChange={changeTempo}
+          handleTap={handleTap}
+        />
+        <div id="wrap" className="flex flex-col items-center px-12 py-4 rounded-2xl transition-[background-color] ease-out duration-500 hover:bg-zinc-900">
+          <BeatManager
           patternSounds={patternSounds}
           switchSound={switchSound}
           handleAddTick={addTick}
@@ -300,13 +284,9 @@ const App: React.FC = () => {
           handleAddBeat={addBeat}
           handleRemoveBeat={removeBeat}
         />
-        <button
-          id="control"
-          className="text-center p-3 rounded-full transition-colors focus:bg-zinc-600 hover:bg-zinc-800"
-          onClick={() => setPlaying(!isPlaying)}
-        >
-          {isPlaying ? <FaStop /> : <FaPlay />}
-        </button>
+        <ControlPanel isPlaying={isPlaying} togglePlay={togglePlay} />
+        </div>
+        
       </div>
     </div>
   );
