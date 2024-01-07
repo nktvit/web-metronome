@@ -17,23 +17,17 @@ const App: React.FC = () => {
   const timerIdRef = useRef<number | null>(null);
   const nextNoteTimeRef = useRef(0);
   const soundBuffersRef = useRef<AudioBuffer[] | null>(null);
+  const patternSoundsRef = useRef<number[][]>([[0, 1, 1, 1], [0, 1, 1, 1]]);
+  const currentPosRef = useRef({rep: 0, beat: 0});
   const tapHistory = useRef<number[]>([]);
 
-  const scheduleAheadTime = 0.1;
-
-  const [patternSounds, setPatternSounds] = useState(
-    [
-      [0, 1, 1, 1],
-      [0, 1, 1, 1],
-    ]
-  );
+  const [patternSounds, setPatternSounds] = useState<number[][]>(patternSoundsRef.current);
+  const [bpm, setBpm] = useState<number>(30);
+  const [isPlaying, setPlaying] = useState<boolean>(false);
 
   const beats = patternSounds.length
 
-  const [bpm, setBpm] = useState<number>(30);
-
-  const [isPlaying, setPlaying] = useState<boolean>(false);
-
+  // Loads the beat audio files into AudioBuffers
   const loadBeatBuffers = async (audioContext: AudioContext, urls: string[]): Promise<AudioBuffer[]> => {
     const buffers = [];
     for (const url of urls) {
@@ -46,23 +40,24 @@ const App: React.FC = () => {
   };
 
   const stopAllSources = () => {
-    playingSourcesRef.current.forEach(source => {
-      source.stop();
-    });
+    playingSourcesRef.current.forEach(source => source.stop());
     playingSourcesRef.current.clear();
   };
 
-  const scheduleBeat = (time: number, beatSound: number) => {
+  const scheduleBeat = (time: number) => {
     const audioContext = audioCtx.current;
-
     if (!audioContext || !soundBuffersRef.current) return;
+
+    const currentPatternSounds = patternSoundsRef.current;
+    const { rep, beat } = currentPosRef.current; 
+    const beatSound = currentPatternSounds[rep][beat];
 
     const buffer = soundBuffersRef.current[beatSound];
     const source = audioContext.createBufferSource();
-
     source.buffer = buffer;
     source.connect(audioContext.destination);
     source.start(time);
+
 
     if (amp.current) {
       // TODO: make gain adjustable in settings
@@ -95,57 +90,65 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const audioContext = audioCtx.current;
-    if (!audioContext || !soundBuffersRef.current) return;
-  
-    let beatIndex = 0; // Tracks the current index in the pattern
-    let repIndex = 0; // Tracks the current repetition
-  
-    const play = () => {
-      const now = audioContext.currentTime;
-      if (nextNoteTimeRef.current < now + scheduleAheadTime) {
-        const beatPattern = patternSounds[repIndex % patternSounds.length];
-        const beatSound = beatPattern[beatIndex % beatPattern.length];
-  
-        scheduleBeat(nextNoteTimeRef.current, beatSound);
-  
-        // Move to the next beat
-        nextNoteTimeRef.current += 60 / bpm / beatPattern.length;
-        beatIndex++;
-  
-        // If we've reached the end of the current pattern, move to the next repetition
-        if (beatIndex >= beatPattern.length) {
-          beatIndex = 0;
-          repIndex++;
-        }
-      }
-  
-      // Schedule the next call of play
-      const delta = Math.max(nextNoteTimeRef.current - audioContext.currentTime, 0);
-      timerIdRef.current = window.setTimeout(play, delta * 1000);
-    };
-  
-    if (isPlaying) {
-      nextNoteTimeRef.current = audioContext.currentTime;
-      beatIndex = 0;
-      repIndex = 0;
-      play();
-    } else {
-      if (timerIdRef.current !== null) {
-        window.clearTimeout(timerIdRef.current);
-      }
-      stopAllSources();
-    }
-  
-    return () => {
-      if (timerIdRef.current !== null) {
-        window.clearTimeout(timerIdRef.current);
-      }
-      stopAllSources();
-    };
-  }, [isPlaying, bpm, patternSounds]);
-  
+        const audioContext = audioCtx.current;
+        if (!audioContext || !soundBuffersRef.current) return;
 
+        let beatIndex = 0;
+        let repIndex = 0;
+
+        const getBeatDuration = (beats: number) => {
+            return 60 / bpm / beats; 
+        };
+
+        const play = () => {
+            const now = audioContext.currentTime;
+
+            if (nextNoteTimeRef.current <= now) { // Skip wrong timing sounds
+                const currentPattern = patternSoundsRef.current[repIndex % patternSoundsRef.current.length];
+                currentPosRef.current = {rep: repIndex % patternSoundsRef.current.length, beat: beatIndex % currentPattern.length};
+
+                scheduleBeat(nextNoteTimeRef.current);
+                
+                nextNoteTimeRef.current += getBeatDuration(currentPattern.length); // Recalculate next note
+                beatIndex++;
+
+                if (beatIndex >= currentPattern.length) {
+                    beatIndex = 0; // Reset the beat index for the next repetition
+                    repIndex++; // Move to the next repetition
+                }
+            }
+        
+            // Schedule the next call of play
+            const delta = Math.max(nextNoteTimeRef.current - now, 0);
+            timerIdRef.current = window.setTimeout(play, delta * 1000);
+        };
+
+        if (isPlaying) {
+            // Initialize for the first play
+            nextNoteTimeRef.current = audioContext.currentTime;
+            beatIndex = 0;
+            repIndex = 0;
+            play();
+        } else {
+            if (timerIdRef.current !== null) {
+                window.clearTimeout(timerIdRef.current);
+            }
+            stopAllSources();
+        }
+
+        return () => {
+            if (timerIdRef.current !== null) {
+                window.clearTimeout(timerIdRef.current);
+            }
+            stopAllSources();
+        };
+    }, [isPlaying, bpm, patternSoundsRef]);
+
+  useEffect(() => {
+    patternSoundsRef.current = patternSounds;
+    console.log("pattern updated ", patternSounds);
+
+  }, [patternSounds]);
 
   useEffect(() => {
     console.log("onaudioCtx.current change | useEffect - browser check");
