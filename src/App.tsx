@@ -25,14 +25,12 @@ const App: React.FC = () => {
     [
       [0, 1, 1, 1],
       [0, 1, 1, 1],
-      [0, 1, 1, 1],
-      [0, 1, 1, 1],
     ]
   );
 
   const beats = patternSounds.length
 
-  const [bpm, setBpm] = useState<number>(60);
+  const [bpm, setBpm] = useState<number>(30);
 
   const [isPlaying, setPlaying] = useState<boolean>(false);
 
@@ -53,13 +51,6 @@ const App: React.FC = () => {
     });
     playingSourcesRef.current.clear();
   };
-
-  // Play the sound
-  // @params play what {beatNumber}, play when {time}
-
-  //TODO: Refactor so that scheduleBeat accept {time} and the pointer in the patternSounds.
-  // It is crucial to check the beatSound in real time so that even after soundSwitch we can play right sound on the same iteration
-  // Think over how to make the code clear with this change 
 
   const scheduleBeat = (time: number, beatSound: number) => {
     const audioContext = audioCtx.current;
@@ -105,29 +96,39 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const audioContext = audioCtx.current;
-
-    if (!audioContext) return;
-
-
+    if (!audioContext || !soundBuffersRef.current) return;
+  
+    let beatIndex = 0; // Tracks the current index in the pattern
+    let repIndex = 0; // Tracks the current repetition
+  
     const play = () => {
-      if (!soundBuffersRef.current) return
-
-      while (nextNoteTimeRef.current < audioContext.currentTime + scheduleAheadTime) {
-        for (let i = 0; i < beats; i++) {
-          const ticksPerBeat = patternSounds[i]
-          ticksPerBeat.forEach(tick => {
-            scheduleBeat(nextNoteTimeRef.current, tick);
-            nextNoteTimeRef.current += 60 / bpm / ticksPerBeat.length;
-          })
+      const now = audioContext.currentTime;
+      if (nextNoteTimeRef.current < now + scheduleAheadTime) {
+        const beatPattern = patternSounds[repIndex % patternSounds.length];
+        const beatSound = beatPattern[beatIndex % beatPattern.length];
+  
+        scheduleBeat(nextNoteTimeRef.current, beatSound);
+  
+        // Move to the next beat
+        nextNoteTimeRef.current += 60 / bpm / beatPattern.length;
+        beatIndex++;
+  
+        // If we've reached the end of the current pattern, move to the next repetition
+        if (beatIndex >= beatPattern.length) {
+          beatIndex = 0;
+          repIndex++;
         }
       }
-
-      timerIdRef.current = window.setTimeout(play, 25);
+  
+      // Schedule the next call of play
+      const delta = Math.max(nextNoteTimeRef.current - audioContext.currentTime, 0);
+      timerIdRef.current = window.setTimeout(play, delta * 1000);
     };
-
+  
     if (isPlaying) {
       nextNoteTimeRef.current = audioContext.currentTime;
-
+      beatIndex = 0;
+      repIndex = 0;
       play();
     } else {
       if (timerIdRef.current !== null) {
@@ -135,14 +136,15 @@ const App: React.FC = () => {
       }
       stopAllSources();
     }
-
+  
     return () => {
       if (timerIdRef.current !== null) {
         window.clearTimeout(timerIdRef.current);
       }
       stopAllSources();
     };
-  }, [isPlaying, bpm, scheduleBeat]);
+  }, [isPlaying, bpm, patternSounds]);
+  
 
 
   useEffect(() => {

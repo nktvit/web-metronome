@@ -9,3 +9,15 @@
 html {
     overflow: hidden;
 }
+
+/* Beat animation */
+@keyframes beatTick {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+  }
+  
+  .active-tick {
+    animation: beatTick 0.5s ease-in-out forwards;
+  }
+  
