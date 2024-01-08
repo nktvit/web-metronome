@@ -16,16 +16,20 @@ A dynamic, interactive metronome application built with React, leveraging the We
 - **Web Audio API**: For managing audio timing and playback.
 - **TypeScript**: For overall application logic.
 
-## Getting Started
+## Live Preview
 
-To get a local copy up and running, follow these simple steps.
+Check out the live application here: [Dynamic Metronome](https://web-metronome.vercel.app/)
+
+Experience the real-time beat control and BPM adjustment capabilities of this dynamic metronome application directly in your browser.
+
+## Installation
 
 ### Prerequisites
 
 - Node.js
 - Command line
 
-### Installation
+### Steps
 
 1. Clone the repository:
    ```sh
