@@ -18,7 +18,7 @@ const BeatManager: React.FC<BeatManagerProps> = ({ patternSounds, switchSound, h
     const beatsAmount = patternSounds.length
 
     return (
-        <div className="flex flex-row my-8">
+        <div className="flex flex-row md:my-8">
             {/* Remove beat - to remove the beat (the whole line of ticks) */}
             {beatsAmount > 1 && (
                 <button

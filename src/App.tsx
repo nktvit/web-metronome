@@ -269,7 +269,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-black">
-      <div className={`flex flex-col items-center ${maxBeats > 4 ? "space-y-2" : "space-y-6"} text-md text-zinc-50`}>
+      <div className={`flex flex-col-reverse md:flex-col py-4 items-center ${maxBeats > 4 ? "md:space-y-2" : "md:space-y-6"} text-md text-zinc-50`}>
         <BPMAdjuster
           bpm={bpm}
           handleBpmChange={changeTempo}
