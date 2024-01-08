@@ -7,7 +7,7 @@ const MAX_BPM = config.maxBpm;
 
 const BPMAdjuster = memo(({ bpm, handleBpmChange, handleTap }: { bpm: number, handleBpmChange: (newTempo: number) => void, handleTap: () => void }) => {
     return (
-        <div className="p-4 md:p-8 rounded-2xl flex flex-col items-center transition-[background-color] ease-out duration-500 hover:bg-zinc-900">
+        <div className="p-4 md:p-8 rounded-2xl flex flex-col items-center transition-[background-color] ease-out duration-500 md:hover:bg-zinc-900">
             <div className="flex flex-row items-center py-4 sm:py-6">
                 <button
                     onClick={() => handleBpmChange(bpm - 1)}
@@ -26,7 +26,8 @@ const BPMAdjuster = memo(({ bpm, handleBpmChange, handleTap }: { bpm: number, ha
             </div>
 
             <input
-                className="transparent h-[4px] w-full mt-6 cursor-pointer appearance-none border-transparent bg-rose-500 dark:bg-rose-500"
+                id="bpm-input"
+                className="transparent h-[4px] w-full mt-4 mb-0.5 py-1.5 rounded-lg cursor-pointer appearance-none border-transparent bg-rose-500 dark:bg-rose-500"
                 type="range"
                 value={bpm}
                 onChange={e => handleBpmChange(parseInt(e.target.value))}
@@ -34,7 +35,6 @@ const BPMAdjuster = memo(({ bpm, handleBpmChange, handleTap }: { bpm: number, ha
                 max={MAX_BPM}
                 step="1"
             />
-            {/* Additional UI for BPM adjustment */}
         </div>
     );
 })

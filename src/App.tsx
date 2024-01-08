@@ -9,6 +9,7 @@ const MIN_BPM = config.minBpm;
 const MAX_BPM = config.maxBpm;
 
 const App: React.FC = () => {
+  // Core audio states(useRef to avoid re-renders)
   const audioCtx = useRef<AudioContext | null>(null);
   const amp = useRef<GainNode | null>(null);
   const playingSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
@@ -20,11 +21,15 @@ const App: React.FC = () => {
   const nextBpmRef = useRef(config.initialBpm);
   const tapHistory = useRef<number[]>([]);
 
+  // both UI and functional states
   const [patternSounds, setPatternSounds] = useState<number[][]>(patternSoundsRef.current);
   const [bpm, setBpm] = useState<number>(nextBpmRef.current);
   const [isPlaying, setPlaying] = useState<boolean>(false);
 
+  // UI states
   const [maxBeats, setMaxBeats] = useState<number>(0) //TODO: make UI shrink when amount of beats per rep exceeds 4
+  const [flash, setFlash] = useState(false);
+
 
   const beats = patternSounds.length
 
@@ -108,6 +113,11 @@ const App: React.FC = () => {
         const currentPattern = patternSoundsRef.current[repIndex % patternSoundsRef.current.length];
         currentPosRef.current = { rep: repIndex % patternSoundsRef.current.length, beat: beatIndex % currentPattern.length };
 
+        if (beatIndex === 0) {
+          setFlash(true);
+          setTimeout(() => setFlash(false), 500);
+        }
+
         scheduleBeat(nextNoteTimeRef.current);
 
         nextNoteTimeRef.current += getBeatDuration(currentPattern.length); // Recalculate next note
@@ -152,12 +162,26 @@ const App: React.FC = () => {
   }, [bpm]);
 
   useEffect(() => {
-    console.log("onaudioCtx.current change | useEffect - browser check");
-
     if (!audioCtx.current) {
       alert("Your browser does not support the Web Audio API. Please use a modern browser for full functionality.");
     }
+
+    // Prevent pinch zoom
+    const preventZoom = (e: TouchEvent) => {
+      if (e.touches.length > 1) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('touchstart', preventZoom, { passive: false });
+    document.addEventListener('touchmove', preventZoom, { passive: false });
+
+    return () => {
+      document.removeEventListener('touchstart', preventZoom);
+      document.removeEventListener('touchmove', preventZoom);
+    };
   }, [])
+
   useEffect(() => {
     const handleKeyDown = (e: any) => {
       if (e.key === ' ') {
@@ -177,6 +201,8 @@ const App: React.FC = () => {
   const changeTempo = (newTempo: number) => setBpm(newTempo < MIN_BPM ? MIN_BPM : newTempo > MAX_BPM ? MAX_BPM : newTempo);
 
   const handleTap = () => {
+    vibrate()
+
     const now = Date.now();
     tapHistory.current.push(now);
 
@@ -266,27 +292,33 @@ const App: React.FC = () => {
   function togglePlay() {
     setPlaying(!isPlaying)
   }
+  // Vibration on bpm tap
+  const vibrate = () => {
+    if ('vibrate' in navigator) {
+        navigator.vibrate(200);
+    }
+};
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-black">
+    <div className={`flex items-center justify-center min-h-screen ${flash ? 'flash-effect' : ''} bg-black`}>
       <div className={`flex flex-col-reverse md:flex-col py-4 items-center ${maxBeats > 4 ? "md:space-y-2" : "md:space-y-6"} text-md text-zinc-50`}>
         <BPMAdjuster
           bpm={bpm}
           handleBpmChange={changeTempo}
           handleTap={handleTap}
         />
-        <div id="wrap" className="flex flex-col items-center px-12 py-4 rounded-2xl transition-[background-color] ease-out duration-500 hover:bg-zinc-900">
+        <div id="wrap" className="flex flex-col items-center px-12 py-4 rounded-2xl transition-[background-color] ease-out duration-500 md:hover:bg-zinc-900">
           <BeatManager
-          patternSounds={patternSounds}
-          switchSound={switchSound}
-          handleAddTick={addTick}
-          handleRemoveTick={removeTick}
-          handleAddBeat={addBeat}
-          handleRemoveBeat={removeBeat}
-        />
-        <ControlPanel isPlaying={isPlaying} togglePlay={togglePlay} />
+            patternSounds={patternSounds}
+            switchSound={switchSound}
+            handleAddTick={addTick}
+            handleRemoveTick={removeTick}
+            handleAddBeat={addBeat}
+            handleRemoveBeat={removeBeat}
+          />
+          <ControlPanel isPlaying={isPlaying} togglePlay={togglePlay} />
         </div>
-        
+
       </div>
     </div>
   );
