@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import {useState, useRef, useEffect} from "react";
 import BeatManager from "./components/BeatManager";
 import ControlPanel from "./components/ControlPanel";
 import config from './config';
@@ -9,7 +9,9 @@ const MIN_BPM = config.minBpm;
 const MAX_BPM = config.maxBpm;
 
 const App: React.FC = () => {
-    const [isAudioSupported, setIsAudioSupported] = useState<boolean | null>(null);
+    // Core audio states(useRef to avoid re-renders)
+    const audioCtx = useRef<AudioContext | null>(null);
+    const amp = useRef<GainNode | null>(null);
     const playingSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
     const timerIdRef = useRef<number | null>(null);
     const nextNoteTimeRef = useRef(0);
@@ -25,132 +27,149 @@ const App: React.FC = () => {
     const [isPlaying, setPlaying] = useState<boolean>(false);
 
     // UI states
-    const [maxBeats, setMaxBeats] = useState<number>(0);
+    const [maxBeats, setMaxBeats] = useState<number>(0) //TODO: make UI shrink when amount of beats per rep exceeds 4
     const [flash, setFlash] = useState(false);
 
-    const beats = patternSounds.length;
 
-    // Memoize AudioContext
-    const audioContext = useMemo(() => {
-        let AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-        if (AudioContext) {
-            try {
-                return new AudioContext();
-            } catch (e) {
-                console.error("Failed to create AudioContext:", e);
-                return null;
-            }
+    const beats = patternSounds.length
+
+    // Loads the beat audio files into AudioBuffers
+    const loadBeatBuffers = async (audioContext: AudioContext, urls: string[]): Promise<AudioBuffer[]> => {
+        const buffers = [];
+        for (const url of urls) {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const buffer = await audioContext.decodeAudioData(arrayBuffer);
+            buffers.push(buffer);
         }
-        return null;
-    }, []);
+        return buffers;
+    };
 
-    const stopAllSources = useCallback(() => {
+    const stopAllSources = () => {
         playingSourcesRef.current.forEach(source => source.stop());
         playingSourcesRef.current.clear();
-    }, []);
+    };
 
-    const getBeatDuration = useCallback((beats: number) => {
+    const getBeatDuration = (beats: number) => {
         return 60 / nextBpmRef.current / beats;
-    }, []);
+    };
 
-    const scheduleBeat = useCallback((time: number) => {
+    const scheduleBeat = (time: number) => {
+        const audioContext = audioCtx.current;
         if (!audioContext || !soundBuffersRef.current) return;
 
-        const { rep, beat } = currentPosRef.current;
-        const beatSound = patternSoundsRef.current[rep][beat];
+        const currentPatternSounds = patternSoundsRef.current;
+        const {rep, beat} = currentPosRef.current;
+        const beatSound = currentPatternSounds[rep][beat];
+
+        const buffer = soundBuffersRef.current[beatSound];
         const source = audioContext.createBufferSource();
-        source.buffer = soundBuffersRef.current[beatSound];
-        
-        const gainNode = audioContext.createGain();
-        gainNode.gain.setValueAtTime(beatSound === 0 ? 4 : 1, audioContext.currentTime);
-        
-        source.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
+        source.buffer = buffer;
+        source.connect(audioContext.destination);
         source.start(time);
+
+
+        if (amp.current) {
+            // TODO: make gain adjustable in settings
+            const gainValue = beatSound === 0 ? 4 : 1 // Play gain x2 for the first beat
+
+            amp.current.gain.setValueAtTime(gainValue, audioContext.currentTime);
+            source.connect(amp.current);
+            amp.current.connect(audioContext.destination);
+        } else {
+            source.connect(audioContext.destination);
+        }
+
         playingSourcesRef.current.add(source);
         source.onended = () => playingSourcesRef.current.delete(source);
-
-        if (beat === 0) {
-            setFlash(true);
-            setTimeout(() => setFlash(false), 500);
-        }
-    }, [audioContext]);
-
-    const play = useCallback(() => {
-        if (!audioContext) return;
-
-        const now = audioContext.currentTime;
-
-        while (nextNoteTimeRef.current <= now + 0.1) { // Schedule ahead by 100ms
-            const currentPattern = patternSoundsRef.current[currentPosRef.current.rep];
-            scheduleBeat(nextNoteTimeRef.current);
-
-            nextNoteTimeRef.current += getBeatDuration(currentPattern.length);
-            currentPosRef.current.beat++;
-
-            if (currentPosRef.current.beat >= currentPattern.length) {
-                currentPosRef.current.beat = 0;
-                currentPosRef.current.rep = (currentPosRef.current.rep + 1) % patternSoundsRef.current.length;
-            }
-        }
-
-        timerIdRef.current = requestAnimationFrame(play);
-    }, [audioContext, scheduleBeat, getBeatDuration]);
+    };
 
     useEffect(() => {
-        setIsAudioSupported(!!audioContext);
-    }, [audioContext]);
+        const audioContext = new AudioContext();
+        audioCtx.current = audioContext;
+        amp.current = audioCtx.current.createGain();
+        amp.current.connect(audioCtx.current.destination);
 
-    useEffect(() => {
-        if (!audioContext || !isAudioSupported) return;
+        loadBeatBuffers(audioContext, soundUrls).then(buffers => {
+            soundBuffersRef.current = buffers;
+        });
 
-        let isMounted = true;
-        const loadBuffers = async () => {
-            const buffers = await Promise.all(soundUrls.map(async (url) => {
-                const response = await fetch(url);
-                const arrayBuffer = await response.arrayBuffer();
-                return await audioContext.decodeAudioData(arrayBuffer);
-            }));
-            if (isMounted) {
-                soundBuffersRef.current = buffers;
-            }
+        return () => {
+            audioContext.close();
         };
-        loadBuffers();
-        return () => { isMounted = false; };
-    }, [audioContext, isAudioSupported]);
+    }, []);
 
     useEffect(() => {
-        if (!audioContext || !isAudioSupported) return;
+        const audioContext = audioCtx.current;
+        if (!audioContext || !soundBuffersRef.current) return;
+
+        let beatIndex = 0;
+        let repIndex = 0;
+
+        const play = () => {
+            const now = audioContext.currentTime;
+
+            if (nextNoteTimeRef.current <= now) { // Skip wrong timing sounds
+                const currentPattern = patternSoundsRef.current[repIndex % patternSoundsRef.current.length];
+                currentPosRef.current = {
+                    rep: repIndex % patternSoundsRef.current.length,
+                    beat: beatIndex % currentPattern.length
+                };
+
+                if (beatIndex === 0) {
+                    setFlash(true);
+                    setTimeout(() => setFlash(false), 500);
+                }
+
+                scheduleBeat(nextNoteTimeRef.current);
+
+                nextNoteTimeRef.current += getBeatDuration(currentPattern.length); // Recalculate next note
+                beatIndex++;
+
+                if (beatIndex >= currentPattern.length) {
+                    beatIndex = 0; // Reset the beat index for the next repetition
+                    repIndex++; // Move to the next repetition
+                }
+            }
+
+            // Schedule the next call of play
+            const delta = Math.max(nextNoteTimeRef.current - now, 0);
+            timerIdRef.current = window.setTimeout(play, delta * 1000);
+        };
 
         if (isPlaying) {
             nextNoteTimeRef.current = audioContext.currentTime;
-            currentPosRef.current = { rep: 0, beat: 0 };
+            beatIndex = 0;
+            repIndex = 0;
             play();
         } else {
             if (timerIdRef.current !== null) {
-                cancelAnimationFrame(timerIdRef.current);
+                window.clearTimeout(timerIdRef.current);
             }
             stopAllSources();
         }
 
         return () => {
             if (timerIdRef.current !== null) {
-                cancelAnimationFrame(timerIdRef.current);
+                window.clearTimeout(timerIdRef.current);
             }
             stopAllSources();
         };
-    }, [isPlaying, audioContext, play, stopAllSources, isAudioSupported]);
+    }, [isPlaying]);
 
     useEffect(() => {
         patternSoundsRef.current = patternSounds;
     }, [patternSounds]);
-
     useEffect(() => {
         nextBpmRef.current = bpm;
     }, [bpm]);
 
     useEffect(() => {
+        if (!audioCtx.current) {
+            alert("Your browser does not support the Web Audio API. Please use a modern browser for full functionality.");
+        }
+
+        // Prevent pinch zoom
         const preventZoom = (e: TouchEvent) => {
             if (e.touches.length > 1) {
                 e.preventDefault();
@@ -164,13 +183,13 @@ const App: React.FC = () => {
             document.removeEventListener('touchstart', preventZoom);
             document.removeEventListener('touchmove', preventZoom);
         };
-    }, []);
+    }, [])
 
     useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
+        const handleKeyDown = (e: any) => {
             if (e.key === ' ') {
-                e.preventDefault();
-                setPlaying(prev => !prev);
+                e.preventDefault()
+                setPlaying(!isPlaying)
             }
         };
 
@@ -179,113 +198,118 @@ const App: React.FC = () => {
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
         };
-    }, []);
 
-    const changeTempo = useCallback((newTempo: number) => {
-        setBpm(prevBpm => Math.min(Math.max(newTempo, MIN_BPM), MAX_BPM));
-    }, []);
+    }, [isPlaying]);
 
-    const calculateAverageTimeDifference = useCallback(() => {
+    const changeTempo = (newTempo: number) => setBpm(newTempo < MIN_BPM ? MIN_BPM : newTempo > MAX_BPM ? MAX_BPM : newTempo);
+
+    const handleTap = () => {
+        vibrate()
+
+        const now = Date.now();
+        tapHistory.current.push(now);
+
+        requestAnimationFrame(() => {
+            if (tapHistory.current.length > config.maxHistoryLength) {
+                tapHistory.current.shift();
+            }
+
+            if (tapHistory.current.length > 1) {
+                const timeDifference = now - tapHistory.current[tapHistory.current.length - 2];
+
+                if (timeDifference <= config.inactivityTime) {
+                    const averageTimeDifference = calculateAverageTimeDifference();
+                    const calculatedBpm = Math.round(60000 / averageTimeDifference);
+
+                    changeTempo(calculatedBpm)
+                }
+            }
+        });
+    };
+
+    const calculateAverageTimeDifference = () => {
         const timeDifferences = tapHistory.current.map((tap, index, arr) => {
             return index === 0 ? 0 : tap - arr[index - 1];
         });
 
         return timeDifferences.reduce((acc, val) => acc + val, 0) / (timeDifferences.length - 1);
-    }, []);
+    };
 
-    const handleTap = useCallback(() => {
-        vibrate();
-        const now = Date.now();
-        tapHistory.current = [...tapHistory.current.slice(-config.maxHistoryLength), now];
-
-        if (tapHistory.current.length > 1) {
-            const timeDifference = now - tapHistory.current[tapHistory.current.length - 2];
-
-            if (timeDifference <= config.inactivityTime) {
-                const averageTimeDifference = calculateAverageTimeDifference();
-                const calculatedBpm = Math.round(60000 / averageTimeDifference);
-                changeTempo(calculatedBpm);
-            }
-        }
-    }, [changeTempo, calculateAverageTimeDifference]);
-
-    const switchSound = useCallback((beatIndex: number, tickIndex: number) => {
+    function switchSound(beatIndex: number, tickIndex: number) {
         if (typeof beatIndex === 'undefined' || typeof tickIndex === 'undefined') return;
 
-        setPatternSounds(prevSounds => {
-            const newPattern = [...prevSounds];
-            const soundToChange = newPattern[beatIndex][tickIndex];
-            newPattern[beatIndex][tickIndex] = soundToChange === 2 ? 0 : soundToChange + 1;
-            return newPattern;
-        });
-    }, []);
+        const soundToChange = patternSounds[beatIndex][tickIndex]
 
-    const addBeat = useCallback(() => {
-        if (beats === config.maxBeat) return;
+        const newPattern = [...patternSounds]
+        newPattern[beatIndex][tickIndex] = soundToChange === 2 ? 0 : soundToChange + 1
 
-        setPatternSounds(prevSounds => {
-            const lastBeatLength = prevSounds[beats - 1].length;
-            const newBeat = [0, ...new Array(lastBeatLength - 1).fill(1)];
-            return [...prevSounds, newBeat];
-        });
-    }, [beats]);
+        setPatternSounds(newPattern);
+    }
 
-    const removeBeat = useCallback(() => {
-        if (beats === 1) return;
+    function addBeat() {
+        if (beats === config.maxBeat) return
 
-        setPatternSounds(prevSounds => prevSounds.slice(0, -1));
-    }, [beats]);
+        const lastBeatLength = patternSounds[beats - 1].length
+        const newBeat = [0, ...new Array(lastBeatLength - 1).fill(1)]
 
-    const addTick = useCallback((beatIndex: number) => {
-        setPatternSounds(prevSounds => {
-            if (prevSounds[beatIndex].length === config.maxTickInTime) return prevSounds;
+        setPatternSounds([...patternSounds, newBeat]);
+    }
 
-            const newPattern = [...prevSounds];
-            newPattern[beatIndex] = [...newPattern[beatIndex], 1];
-            return newPattern;
-        });
-    }, []);
+    function removeBeat() {
+        if (beats === 1) return
 
-    const removeTick = useCallback((beatIndex: number) => {
-        setPatternSounds(prevSounds => {
-            if (prevSounds[beatIndex].length === 1) return prevSounds;
+        const newPattern = [...patternSounds]
+        newPattern.pop()
 
-            const newPattern = [...prevSounds];
-            newPattern[beatIndex] = newPattern[beatIndex].slice(0, -1);
-            return newPattern;
-        });
-    }, []);
+        setPatternSounds(newPattern);
+    }
 
-    const togglePlay = useCallback(() => {
-        setPlaying(prev => !prev);
-    }, []);
+    function addTick(beatIndex: number) {
+        const currentBeat = patternSounds[beatIndex]
 
-    const vibrate = useCallback(() => {
+        if (currentBeat.length === config.maxTickInTime) return
+
+        const newBeat = [...currentBeat, 1]
+
+        const newPattern = [...patternSounds]
+
+        newPattern[beatIndex] = newBeat
+
+        setPatternSounds(newPattern)
+    }
+
+    function removeTick(beatIndex: number) {
+        const currentBeat = patternSounds[beatIndex]
+
+        if (currentBeat.length === 1) return
+
+        const newBeat = [...currentBeat]
+        newBeat.pop()
+
+        const newPattern = [...patternSounds]
+
+        newPattern[beatIndex] = newBeat
+
+        setPatternSounds(newPattern)
+    }
+
+    function togglePlay() {
+        setPlaying(!isPlaying)
+    }
+
+    // Vibration on bpm tap
+    const vibrate = () => {
         if ('vibrate' in navigator) {
             navigator.vibrate(200);
         }
-    }, []);
-
-    if (isAudioSupported === null) {
-        return <div>Checking audio support...</div>;
-    }
-
-    if (!isAudioSupported) {
-        return (
-            <div className="flex items-center justify-center min-h-screen bg-black text-zinc-50">
-                <div className="text-center p-4">
-                    <h1 className="text-2xl mb-4">Audio Not Supported</h1>
-                    <p>Your browser does not support the Web Audio API.</p>
-                    <p>Please use a modern browser for full functionality.</p>
-                </div>
-            </div>
-        );
-    }
+    };
 
     return (
         <div className={`flex items-center justify-center min-h-screen ${flash ? 'flash-effect' : ''} bg-black`}>
-            <div className={`flex flex-col py-4 items-center ${maxBeats > 4 ? "md:space-y-2" : "md:space-y-6"} text-md text-zinc-50`}>
-                <div className="px-6 sm:px-12 py-2 sm:py-4 rounded-2xl transition-[background-color] ease-out duration-500 md:hover:bg-zinc-900">
+            <div
+                className={`flex flex-col py-4 items-center ${maxBeats > 4 ? "md:space-y-2" : "md:space-y-6"} text-md text-zinc-50`}>
+                <div
+                    className="px-6 sm:px-12 py-2 sm:py-4 rounded-2xl transition-[background-color] ease-out duration-500 md:hover:bg-zinc-900">
                     <BeatManager
                         patternSounds={patternSounds}
                         switchSound={switchSound}
@@ -300,10 +324,13 @@ const App: React.FC = () => {
                     handleBpmChange={changeTempo}
                     handleTap={handleTap}
                 />
+
                 <ControlPanel className="mt-6 sm:mt-8" isPlaying={isPlaying} togglePlay={togglePlay}/>
+
+
             </div>
         </div>
     );
 };
 
-export default React.memo(App);
+export default App;
