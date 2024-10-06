@@ -18,7 +18,7 @@ A dynamic, interactive metronome application built with React, leveraging the We
 
 ## Live Preview
 
-Check out the live application here: [Dynamic Metronome](https://web-metronome.vercel.app/)
+Check out the live application here: [Dynamic Metronome](https://webmetronome.vercel.app/)
 
 Experience the real-time beat control and BPM adjustment capabilities of this dynamic metronome application directly in your browser.
 
